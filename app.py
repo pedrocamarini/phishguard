@@ -11,11 +11,10 @@ load_dotenv()
 def obter_url_final(url):
     """
     Segue os redirecionamentos (HTTP 301/302) para encontrar o destino real.
-    Usa stream=True para não baixar o corpo da resposta (segurança).
     """
     try:
-        # Adicionamos um User-Agent para sites não bloquearem o script achando que é robô
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        # stream=True economiza banda e aumenta segurança ao não baixar o corpo da resposta
         response = requests.get(url, allow_redirects=True, timeout=10, stream=True, headers=headers)
         return response.url
     except Exception as e:
@@ -32,6 +31,31 @@ def limpar_url(url):
         return domain
     except:
         return None
+
+def salvar_log(url, veredito, pontos):
+    """
+    Salva o resultado da análise em um arquivo de texto para auditoria futura.
+    """
+    arquivo_log = "relatorio_seguranca.txt"
+    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    
+    # Define um rótulo visual para o log
+    if pontos >= 3:
+        status = "[PERIGO]  "
+    elif pontos > 0:
+        status = "[SUSPEITO]"
+    else:
+        status = "[SEGURO]  "
+        
+    linha_log = f"{data_hora} | {status} | {url} | Resultado: {veredito}\n"
+    
+    try:
+        # 'a' (append) adiciona ao final do arquivo sem apagar o histórico
+        with open(arquivo_log, 'a', encoding='utf-8') as f:
+            f.write(linha_log)
+        print(f"📝 Evidência salva em: {arquivo_log}")
+    except Exception as e:
+        print(f"⚠️ Erro ao salvar log: {e}")
 
 def consultar_virustotal(domain):
     print(f"🦠 Consultando VirusTotal para: {domain}...")
@@ -60,9 +84,9 @@ def consultar_virustotal(domain):
         return f"Erro na conexão: {e}"
 
 def analisar_dominio(url_inicial):
-    print(f"\n🚀 INICIANDO PROCESSAMENTO...")
+    print(f"\n🚀 INICIANDO INVESTIGAÇÃO...")
     
-    # --- NOVIDADE: Rastreio de Redirecionamento ---
+    # 1. Rastreio de Redirecionamento
     url_final = obter_url_final(url_inicial)
     
     if url_final != url_inicial:
@@ -74,15 +98,15 @@ def analisar_dominio(url_inicial):
     
     print("-" * 40)
     
-    # 1. Limpeza (Usamos a URL FINAL agora)
+    # 2. Limpeza e Extração do Domínio
     domain = limpar_url(url_final)
     if not domain: return "Url Inválida"
     print(f"🔍 Analisando Domínio: {domain}")
 
-    # 2. WHOIS (Idade)
-    veredito_idade = "Desconhecido"
     pontos_perigo = 0
-    
+    veredito_idade = "Desconhecido"
+
+    # 3. WHOIS (Idade)
     try:
         domain_info = whois.whois(domain)
         data_criacao = domain_info.creation_date
@@ -105,15 +129,14 @@ def analisar_dominio(url_inicial):
             else:
                 veredito_idade = "Seguro (Antigo)"
     except:
-        print("⚠️ Erro ao consultar WHOIS (pode ser domínio privado)")
+        print("⚠️ Erro ao consultar WHOIS (Domínio pode ser privado ou erro de conexão)")
 
-    # 3. REPUTAÇÃO (VirusTotal)
+    # 4. REPUTAÇÃO (VirusTotal)
     resultado_vt = consultar_virustotal(domain)
     veredito_vt = "Limpo"
     
     if isinstance(resultado_vt, dict):
         maliciosos = resultado_vt.get('malicious', 0)
-        suspiciosos = resultado_vt.get('suspicious', 0)
         print(f"👿 Detectado como malicioso por: {maliciosos} antivírus")
         
         if maliciosos > 0:
@@ -122,7 +145,7 @@ def analisar_dominio(url_inicial):
     elif resultado_vt == "NaoListado":
         print("👻 VirusTotal não conhece este domínio.")
     
-    # 4. CONCLUSÃO FINAL
+    # 5. RELATÓRIO E LOG
     print("-" * 40)
     print("📊 RELATÓRIO FINAL")
     print(f"🔗 URL Analisada: {url_final}")
@@ -130,16 +153,23 @@ def analisar_dominio(url_inicial):
     print(f"2. Reputação: {veredito_vt}")
     print("-" * 40)
     
+    resultado_final_texto = ""
     if pontos_perigo >= 3:
-        return "🚨 RESULTADO: GOLPE / PERIGOSO! NÃO ACESSE."
+        resultado_final_texto = "GOLPE / PERIGOSO"
     elif pontos_perigo > 0:
-        return "⚠️ RESULTADO: SUSPEITO. Tenha cuidado."
+        resultado_final_texto = "SUSPEITO"
     else:
-        return "✅ RESULTADO: Aparentemente seguro."
+        resultado_final_texto = "SEGURO"
+        
+    # Salva no arquivo de texto
+    salvar_log(url_final, resultado_final_texto, pontos_perigo)
+    
+    return f"Resultado: {resultado_final_texto}"
 
 if __name__ == "__main__":
-    # Adiciona http se o usuário esquecer, para o requests funcionar
-    url_teste = input("Cole a URL: ")
+    url_teste = input("Cole a URL para verificar: ")
+    
+    # Adiciona http se o usuário esquecer
     if not url_teste.startswith(('http://', 'https://')):
         url_teste = 'http://' + url_teste
         
